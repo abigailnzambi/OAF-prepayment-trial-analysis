@@ -1,0 +1,374 @@
+---
+title: "Exploring strategies to improve repayment on One Acre Fund's group loans"
+author: "Abigail Nzambi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+required_pkgs <- c("tidyverse", "kableExtra", "scales")
+
+missing_pkgs <- required_pkgs[!required_pkgs %in% installed.packages()[, 1]]
+if (length(missing_pkgs) > 0) install.packages(missing_pkgs)
+
+purrr::walk(required_pkgs, library, character.only = TRUE)
+rm(required_pkgs, missing_pkgs)
+```
+
+# Executive Summary
+
+This analysis looks at whether changing the prepayment structure, from a flat **500 KES** fee to **10% of each farmer's total transaction size**, produces results strong enough to justify scaling across all 22 Kenya districts. 
+
+## Data
+
+**Trial districts**: Chwele, Bungoma, Lugari (3 districts, 10% prepayment)  
+**Control districts**: Remaining 19 districts (flat 500 KES prepayment)
+
+## Metrics
+
+Rather than working from the raw counts alone, I derived four rates that make the trial and control groups directly comparable regardless of district size:
+
+- **Qualification rate**: enrolled farmers who paid their prepayment and qualified
+- **Drop rate**: enrolled farmers who were dropped at the December deadline (1 - qualification rate)
+- **Repayment rate**: qualified farmers who fully repaid by the final extension deadline
+- **Default rate**: qualified farmers who did not repay
+
+I chose to calculate repayment rate off qualified farmers rather than enrolled farmers deliberately because it isolates the repayment behaviour of farmers who actually made it through enrollment, which is where the 10% fee is supposed to have its effect.
+
+## Approach
+
+The analysis compares trial and control districts on all four metrics across both years.
+
+
+```{r}
+# Trial districts
+trial_districts <- c("Chwele", "Bungoma", "Lugari")
+
+# 2020 district-level data
+df_2020 <- tibble(
+  district = c("Bungoma", "Kakamega (South)", "Webuye", "Chwele", "Butere",
+                    "Teso", "Busia", "Lugari", "Kakamega B (North)", "Sirisia",
+                    "Matete", "Gem", "Kimilili", "Hamisi", "Alego", "Ndalu",
+                    "Vihiga", "Cherangany", "Nambale", "Serabo", "Saboti", "Mumias"),
+  enrolled = c(12678, 14362, 15824, 10912, 15218, 18589, 15182, 18455, 15553,
+                    12174, 15082, 18076, 15840, 10560, 19852, 16251, 15719, 15881,
+                    14292, 11062, 11133, 16709),
+  qualified = c(9686, 12036, 11617, 7167, 12963, 14538, 11897, 15298, 12366,
+                    9668, 10721, 15422, 11798, 8958, 16775, 11725, 12849, 12635,
+                    10912, 7827, 8263, 12883),
+  repaid = c(8690, 11939, 10867, 7113, 12770, 14426, 10945, 14636, 12068,
+                    8600, 10168, 13871, 10157, 7940, 14692, 10061, 11546, 10355,
+                    9450, 6580, 6566, 12430),
+  defaulted = c(996, 97, 750, 54, 193, 112, 952, 662, 298, 1068, 553, 1551,
+                    1641, 1018, 2083, 1664, 1303, 2280, 1462, 1247, 1697, 453),
+  revenue = c(86186893, 108085045, 104759111, 63289243, 126659331, 140805877,
+                    113973444, 186925430, 121379127, 109765082, 101096797, 154676025,
+                    121127354, 91711334, 174247210, 132890871, 119042718, 169450702,
+                    108877274, 79654167, 85262080, 118754050),
+  amt_defaulted = c(3967686, 325060, 2421267, 182513, 695389, 484767, 4172865,
+                    2723943, 1132674, 4491044, 2262090, 7372734, 7409369, 4900009,
+                    10025972, 7492494, 4945982, 12710840, 6918278, 5301140,
+                    8269087, 1512960),
+  year = 2020
+)
+
+# 2019 district-level data
+df_2019 <- tibble(
+  district = c("Bungoma", "Kakamega (South)", "Webuye", "Chwele", "Butere",
+                    "Teso", "Busia", "Lugari", "Kakamega B (North)", "Sirisia",
+                    "Matete", "Gem", "Kimilili", "Hamisi", "Alego", "Ndalu",
+                    "Vihiga", "Cherangany", "Nambale", "Serabo", "Saboti", "Mumias"),
+  enrolled = c(12303, 12946, 15914, 10779, 16150, 15840, 14544, 17022, 15921,
+                    10302, 15928, 17996, 14439, 10361, 18569, 14599, 17297, 12220,
+                    15180, 8420, 11923, 15888),
+  qualified = c(9451, 11140, 11352, 7572, 13513, 12538, 11981, 13730, 12503,
+                    8031, 11300, 15823, 10715, 9048, 16558, 10569, 14845, 9432,
+                    11484, 6624, 8671, 12501),
+  repaid = c(9131, 11141, 11321, 7571, 13351, 12451, 11518, 13525, 12491,
+                    7929, 10960, 15232, 10422, 8341, 15326, 9759, 14441, 8669,
+                    10646, 5608, 7161, 12467),
+  defaulted = c(320, 0, 31, 1, 162, 87, 463, 205, 12, 102, 340, 591, 293,
+                    707, 1232, 810, 404, 763, 838, 1016, 1510, 34),
+  revenue = c(87247064, 106084947, 107753820, 75050421, 137692303, 130486933,
+                    125174335, 173566072, 122188682, 89497401, 114803444, 173806645,
+                    108579545, 86806546, 198524401, 126424714, 136044599, 121905771,
+                    121257329, 66976696, 95804491, 126505967),
+  amt_defaulted = c(976710, 0, 102320, 1000, 586438, 314303, 1637690, 828483,
+                    64127, 445286, 1215925, 2757644, 1093176, 2758610, 4673907,
+                    3716774, 1424366, 3448810, 3083655, 4598128, 6962514, 127975),
+  year = 2019
+)
+```
+
+```{r}
+#feature-engineering
+
+# Combining both years
+df <- bind_rows(df_2019, df_2020)
+
+# Tag trial vs control districts
+df <- df %>% mutate(
+  group = if_else(district %in% trial_districts, "Trial (10%)", "Control (flat 500 KES)"),
+  group = factor(group, levels = c("Trial (10%)", "Control (flat 500 KES)")))
+
+# Deriving key metrics
+df <- df %>%
+  mutate(
+    pct_qualified = qualified / enrolled,
+    pct_repaid = repaid / qualified,
+    pct_defaulted = defaulted / qualified,
+    drop_rate = 1 - pct_qualified,
+    default_rev_pct = amt_defaulted / revenue,
+    year = factor(year))
+```
+
+
+```{r}
+# A custom visualization theme
+graph_theme <- theme(
+  legend.position = "bottom",
+  legend.title = element_blank(),
+  axis.line.y = element_blank(),
+  axis.line.x = element_line(colour = "black", size = 0.5),
+  legend.text = element_text(family = "sans", size = rel(0.9)),
+  plot.caption = element_text(family = "sans", size = rel(1.0), vjust = -0.5),
+  plot.title = element_text(family = "sans", size = rel(1.4), hjust = 0.5, face = "bold"),
+  plot.subtitle = element_text(family = "sans", size = rel(1.1), hjust = 0.5),
+  axis.text = element_text(family = "sans", size = rel(1.0)),
+  axis.title = element_text(family = "sans", size = rel(1.0)),
+  strip.text.x = element_text(family = "sans", size = rel(1.2)),
+  panel.background = element_rect(fill = NA),
+  strip.background = element_rect(fill = NA, colour = "black"))
+
+# A custom color palette
+pal_group <- scale_fill_manual(values = c("#3C7F67" ,"#DDD6BF", "#2C4D52"))
+```
+
+---
+
+# 1. Enrollment & Qualification
+## Did the 10% prepayment cause more farmers to drop out at enrollment?
+
+```{r}
+# Average qualification and drop rates by group and year
+q1_tbl <- df %>%
+  group_by(year, group) %>%
+  summarise(
+    n_districts = n(),
+    avg_qualification = percent(round(mean(pct_qualified), 4), accuracy = 0.1),
+    avg_drop_rate = percent(round(mean(drop_rate), 4), accuracy = 0.1))
+
+kable_styling(
+  kable(q1_tbl,
+        col.names = c("Year", "Group", "Districts", "Avg Qualification Rate", "Avg Drop Rate")),
+  bootstrap_options = "striped", full_width = FALSE
+)
+```
+
+```{r}
+# Visualizing drop rates across groups and years
+drop_chart_data <- df %>%
+  group_by(year, group) %>%
+  summarise(avg_drop = mean(drop_rate))
+
+ggplot(drop_chart_data, aes(x = year, y = avg_drop, fill = group)) +
+  geom_col(position = position_dodge(0.75), width = 0.65) +
+  geom_text(aes(label = percent(round(avg_drop, 3))),
+            position = position_dodge(0.75), vjust = -0.4, size = 3.5) +
+  scale_y_continuous(labels = percent_format(), limits = c(0, 0.35)) +
+  labs(
+    title = "Enrollment drop rate: trial vs control by year",
+    x = "Season", y = "Average drop rate"
+  ) +
+  pal_group + graph_theme
+```
+
+
+Trial districts dropped **24.1% of enrolled farmers in 2019 vs 20.5%** in control, and **25.0% vs 21.6%** in 2020. That is roughly 3.5 to 4 percentage points more farmers lost at the enrollment stage each year. In absolute terms this may not sound large, but in a programme where dropped farmers almost never re-enroll the following season, these are effectively permanent losses Any decision to scale needs to account for that long-term loss of reach. 
+The 10% prepayment asks more from farmers upfront, so it is reasonable to expect that some farmers who would have qualified under the flat fee will not make it through December under this model.
+---
+
+# 2. Repayment
+## Did the 10% prepayment improve repayment among farmers who qualified?
+```{r}
+# Average repayment and default rates by group and year
+q2_tbl <- df %>%
+  group_by(year, group) %>%
+  summarise(
+    n_districts = n(),
+    avg_repayment_rate = percent(round(mean(pct_repaid), 4), accuracy = 0.1),
+    avg_default_rate = percent(round(mean(pct_defaulted), 4), accuracy = 0.1))
+
+kable_styling(
+  kable(q2_tbl,
+        col.names = c("Year", "Group", "Districts", "Avg Repayment Rate", "Avg Default Rate")),
+  bootstrap_options = "striped", full_width = FALSE
+)
+```
+
+```{r}
+# Repayment rate comparison by group and year
+repayment_chart_data <- df %>%
+  group_by(year, group) %>%
+  summarise(avg_repayment = mean(pct_repaid))
+
+ggplot(repayment_chart_data, aes(x = year, y = avg_repayment, fill = group)) +
+  geom_col(position = position_dodge(0.75), width = 0.65) +
+  geom_text(aes(label = percent(round(avg_repayment, 3))),
+            position = position_dodge(0.75), vjust = -0.4, size = 3.5) +
+  scale_y_continuous(labels = percent_format(), limits = c(0, 1.08)) +
+  labs(
+    title = "Repayment rate: trial vs control by year",
+    x = "Season", y = "Average repayment rate"
+  ) +
+  pal_group + graph_theme
+```
+
+```{r}
+# Default rate comparison by group and year
+default_chart_data <- df %>%
+  group_by(year, group) %>%
+  summarise(avg_default = mean(pct_defaulted))
+
+ggplot(default_chart_data, aes(x = year, y = avg_default, fill = group)) +
+  geom_col(position = position_dodge(0.75), width = 0.65) +
+  geom_text(aes(label = percent(round(avg_default, 3))),
+            position = position_dodge(0.75), vjust = -0.4, size = 3.5) +
+  scale_y_continuous(labels = percent_format(), limits = c(0, 0.13)) +
+  labs(
+    title = "Default rate: trial vs control by year",
+    x = "Season", y = "Average default rate"
+  ) +
+  pal_group + graph_theme
+```
+
+In 2019, trial districts averaged **98.4% repayment vs 95.2%** in control. In 2020, **94.9% vs 90.5%**. The gap was consistent even as both groups showed a repayment decline in 2020, suggesting the 10% model is providing a more durable form of commitment from farmers. The defaulting rate gap, **5.1% vs 9.5%** in 2020, shows that control districts were defaulting at nearly double the rate of trial districts.
+Farmers who do make it through enrollment under the 10% model repay at noticeably higher rates.
+---
+
+# 4. Financial Impact
+## What is the revenue cost of defaults under each model?
+```{r}
+# Total revenue and defaults by group and year
+revenue_tbl <- df %>%
+  group_by(year, group) %>%
+  summarise(
+    total_revenue = comma(sum(revenue)),
+    total_defaulted = comma(sum(amt_defaulted)),
+    default_pct = sprintf("%.2f%%", sum(amt_defaulted) / sum(revenue) * 100))
+
+kable_styling(
+  kable(revenue_tbl,
+        col.names = c("Year", "Group", "Total Revenue (KES)",
+                      "Total Defaulted (KES)", "Default % of Revenue")),
+  bootstrap_options = "striped", full_width = FALSE,
+)
+```
+
+```{r}
+# Defaults as a share of revenue by group and year
+rev_default_data <- df %>%
+  group_by(year, group) %>%
+  summarise(def_rev = sum(amt_defaulted) / sum(revenue))
+
+ggplot(rev_default_data, aes(x = year, y = def_rev, fill = group)) +
+  geom_col(position = position_dodge(0.75), width = 0.65) +
+  geom_text(aes(label = sprintf("%.2f%%", def_rev * 100)),
+            position = position_dodge(0.75), vjust = -0.4, size = 3.5) +
+  scale_y_continuous(labels = percent_format(), limits = c(0, 0.06)) +
+  labs(
+    title = "Percentage default on revenue: trial vs control by year",
+    x = "Season", y = "Defaults as % of revenue"
+  ) +
+  pal_group + graph_theme
+```
+
+Comparing raw default amounts across groups with different numbers of districts is not a fair comparison, so I focused on defaults as a ratio of revenue instead. Trial districts lost **0.54% of revenue to defaults in 2019 vs 1.70%** in control. By 2020, that gap had widened to **2.04% vs 4.07%**. control districts mre than doubled their default share while trial districts saw a smaller increase. 
+
+---
+
+# 5. District-Level Results
+# District-level repayment rates for both years
+```{r fig.width=11, fig.height=8}
+# District-level repayment rates for both years, faceted for comparison
+ggplot(df, aes(x = reorder(district, pct_repaid), y = pct_repaid, fill = group)) +
+  geom_col(width = 0.75) +
+  coord_flip() +
+  scale_y_continuous(labels = percent_format()) +
+  facet_wrap(~year) +
+  labs(
+    title = "Repayment rate by district: trial vs control by year",
+    x = "", y = "Repayment rate") +
+  pal_group + graph_theme
+```
+
+---
+
+## A Closer Look at the Trial Districts Over Time
+```{r}
+# Year-over-year comparison for the three trial districts
+yoy_tbl <- df %>%
+  filter(group == "Trial (10%)") %>%
+  select(district, year, pct_qualified, pct_repaid, pct_defaulted) %>%
+  mutate(
+    pct_qualified = percent(round(pct_qualified, 3)),
+    pct_repaid = percent(round(pct_repaid, 3)),
+    pct_defaulted = percent(round(pct_defaulted, 3))) %>%
+  arrange(district, year)
+
+kable_styling(
+  kable(yoy_tbl,
+        col.names = c("District", "Year", "Qualification Rate",
+                      "Repayment Rate", "Default Rate"),
+        align = "llrrr"),
+  bootstrap_options = "striped", full_width = FALSE
+)
+```
+
+## A Closer Look at the Bugoma
+```{r}
+# Spotlight on Bungoma, which deteriorated sharply in 2020 despite being a trial district
+bungoma_data <- df %>%
+  filter(district == "Bungoma") %>%
+  select(year, pct_repaid, pct_defaulted, drop_rate) %>%
+  pivot_longer(cols = c(pct_repaid, pct_defaulted, drop_rate),
+               names_to = "metric", values_to = "value") %>%
+  mutate(metric = recode(metric,
+                         pct_repaid = "Repayment Rate",
+                         pct_defaulted = "Default Rate",
+                         drop_rate = "Drop Rate"))
+
+ggplot(bungoma_data, aes(x = year, y = value, fill = metric)) +
+  geom_col(position = position_dodge(0.75), width = 0.6) +
+  geom_text(aes(label = percent(round(value, 3))),
+            position = position_dodge(0.75), vjust = -0.4, size = 3.2) +
+  scale_y_continuous(labels = percent_format(), limits = c(0, 1.1)) +
+  scale_fill_manual(values = c("Repayment Rate" ="#DDD6BF",
+                               "Default Rate"   =  "#2C4D52",
+                               "Drop Rate"      = "#3C7F67")) +
+  labs(
+    title = "Bungoma key metrics: 2019 vs 2020",
+    x = "Season", y = "Rate") +
+  graph_theme
+```
+
+Chwele and Lugari held up well across both seasons. Bungoma is the one that needs attention — its repayment rate fell from **96.6% in 2019 to 89.7% in 2020**, and its default rate jumped from **3.4% to 10.3%**. That kind of shift within a single district, under the same prepayment model, points to something happening at the district level rather than a problem with the 10% structure itself. Several control districts showed similar deterioration in 2020, which supports that reading. Before scaling, it would be worth investigating what drove Bungoma's 2020 results specifically.
+
+---
+
+# Conclusion and Recommendation
+
+The data across both yearsshows that trial districts repaid better, defaulted less, and lost a smaller share of revenue, and they did this consistently throughout the two season. The results were consistent even as repayment worsened across the board in 2020, which is an important signal about the durability of the effect.
+
+The 10% model drops approximately in enrolments, from 3.5 to 4 percentage from 2019 to 2020. Given how rarely dropped farmers return, this represents a genuine long-term reduction in programme reach that needs to be investigated.
+
+I would recommend scaling the 10% prepayment fee, but with two conditions. 
+
+First, the Bungoma 2020 results should be investigated before rollout, to understand whether that deterioration was driven by local factors or something in the implementation. This is important for anticipating how the model will perform in new districts. 
+
+Second, tracking dropout alongside repayment TO ensure the scale-up is genuinely improving outcomes rather than just narrowing who gets access. The reason the 10% model produces better repayment is partly because it filters out farmers who cannot meet a higher upfront bar. That is a real effect, but it means the programme could be quietly getting smaller over time while the repayment numbers look good. 
+
+
+--- 
