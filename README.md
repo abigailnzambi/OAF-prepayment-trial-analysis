@@ -1,6 +1,6 @@
 # OAF Prepayment Trial Analysis
 This project analyses a two-year Innovation Lab trial run by One Acre Fund 
-across three Kenya districts — Chwele, Bungoma, and Lugari — to evaluate 
+across three Kenya districts — Chwele, Bungoma, and Lugari, to evaluate 
 whether changing the group loan prepayment fee from a flat 500 KES to 10% 
 of each farmer's total transaction size improves repayment outcomes.
 
